@@ -14,6 +14,8 @@ WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
 BLACK = (0, 0, 0)
 GOLD = (255, 215, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
 
 # Parametry piłki
 radius = 30
@@ -27,6 +29,7 @@ kick_strength = -10
 # Wynik
 score = 0
 font = pygame.font.SysFont(None, 50)
+small_font = pygame.font.SysFont(None, 36)
 
 # Pieniążek
 coin_radius = 20
@@ -49,6 +52,32 @@ clock = pygame.time.Clock()
 running = True
 game_started = False
 game_over = False
+
+# Przycisk resetowania
+reset_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 50)
+
+def reset_game():
+    global score, gravity, mass, velocity, game_over, game_started
+    global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
+    global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
+    
+    score = 0
+    gravity = 0.05
+    mass = 1.0
+    velocity = 0
+    reset_ball_position()
+    game_over = False
+    game_started = False
+    
+    # Resetuj pieniążki
+    coin_visible = False
+    bad_coin_visible = False
+    coin_timer = 0
+    bad_coin_timer = 0
+    last_coin_check = time.time()
+    last_bad_coin_check = time.time()
+    next_coin_time = random.uniform(5, 10)
+    next_bad_coin_time = random.uniform(8, 12)
 
 def reset_ball_position():
     global x, y
@@ -99,12 +128,6 @@ while running:
     if bad_coin_visible:
         pygame.draw.circle(screen, (255, 0, 0), (bad_coin_x, bad_coin_y), bad_coin_radius)
 
-    # Kliknięcie w czerwony pieniążek – nic się nie dzieje, ale znika
-    if bad_coin_visible:
-        bad_coin_distance = ((mouse_x - bad_coin_x) ** 2 + (mouse_y - bad_coin_y) ** 2) ** 0.5
-        if bad_coin_distance <= bad_coin_radius:
-            bad_coin_visible = False  # znika, ale bez efektu    
-
     # Ekran startowy
     if not game_started:
         intro_text = font.render("Kliknij piłkę, aby rozpocząć!", True, BLACK)
@@ -112,8 +135,17 @@ while running:
         pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
 
     elif game_over:
+        # Ekran końcowy z przyciskiem resetowania
         over_text = font.render(f"Koniec gry! Wynik: {score}", True, BLACK)
-        screen.blit(over_text, (WIDTH // 2 - 250, HEIGHT // 2 - 30))
+        screen.blit(over_text, (WIDTH // 2 - 200, HEIGHT // 2 - 80))
+        
+        # Rysuj przycisk resetowania
+        pygame.draw.rect(screen, GREEN, reset_button_rect)
+        pygame.draw.rect(screen, BLACK, reset_button_rect, 3)
+        reset_text = small_font.render("Resetuj grę", True, BLACK)
+        reset_text_rect = reset_text.get_rect(center=reset_button_rect.center)
+        screen.blit(reset_text, reset_text_rect)
+        
         pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
 
     else:
@@ -149,21 +181,16 @@ while running:
                 if not game_started:
                     game_started = True
                     velocity = 0
-                elif game_over:
-                    # Restart
-                    score = 0
-                    gravity = 0.05
-                    mass = 1.0
-                    velocity = 0
-                    reset_ball_position()
-                    game_over = False
-                    game_started = False
-                else:
+                elif not game_over:
                     velocity = kick_strength / mass
                     reset_ball_position()
                     score += 1
                     gravity *= 1.05
                     mass *= 1.05
+
+            # Kliknięcie w przycisk resetowania
+            if game_over and reset_button_rect.collidepoint(mouse_x, mouse_y):
+                reset_game()
 
             # Kliknięcie w pieniążek
             if coin_visible:
@@ -171,6 +198,12 @@ while running:
                 if coin_distance <= coin_radius:
                     score += 5
                     coin_visible = False  # znika od razu
+
+            # Kliknięcie w czerwony pieniążek – nic się nie dzieje, ale znika
+            if bad_coin_visible:
+                bad_coin_distance = ((mouse_x - bad_coin_x) ** 2 + (mouse_y - bad_coin_y) ** 2) ** 0.5
+                if bad_coin_distance <= bad_coin_radius:
+                    bad_coin_visible = False  # znika, ale bez efektu    
 
     pygame.display.flip()
     clock.tick(60)
