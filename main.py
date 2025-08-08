@@ -84,7 +84,7 @@ class Platform:
         return False
 
 platforms = []
-next_platform_time = random.uniform(10, 15)
+next_platform_time = random.uniform(5, 10)
 last_platform_check = time.time()
 
 # Stan gry
