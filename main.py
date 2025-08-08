@@ -209,16 +209,16 @@ while running:
         last_bad_coin_check = now
         next_bad_coin_time = random.uniform(8, 12)
 
-    # Czas minął → znikają i odejmujemy punkty
-    if bad_coin_visible and now > bad_coin_timer:
+    # Czas minął → znikają i odejmujemy punkty (tylko jeśli gra nie jest skończona)
+    if bad_coin_visible and now > bad_coin_timer and not game_over:
         score -= 3
         bad_coin_visible = False
 
-    # Rysuj pieniążek jeśli jest widoczny
-    if coin_visible:
+    # Rysuj pieniążek jeśli jest widoczny (tylko jeśli gra nie jest skończona)
+    if coin_visible and not game_over:
         pygame.draw.circle(screen, GOLD, (coin_x, coin_y), coin_radius)
     
-    if bad_coin_visible:
+    if bad_coin_visible and not game_over:
         pygame.draw.circle(screen, (255, 0, 0), (bad_coin_x, bad_coin_y), bad_coin_radius)
 
     # Ekran startowy
