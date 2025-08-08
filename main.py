@@ -185,7 +185,23 @@ while running:
             
             # Sprawdź kolizję z piłką
             if platform.check_collision(x, y, radius):
-                handle_ball_click()
+                # Odbij piłkę bez teleportacji
+                velocity = kick_strength / mass
+                score += 1
+                gravity *= 1.05
+                mass *= 1.05
+                click_count += 1
+                
+                # Sprawdź czy należy zmniejszyć piłkę
+                if click_count % clicks_for_size_reduction == 0:
+                    radius *= 0.9  # Zmniejsz o 10%
+                    # Upewnij się, że piłka nie wyjdzie poza ekran po zmianie rozmiaru
+                    if x - radius < 0:
+                        x = radius
+                    if x + radius > WIDTH:
+                        x = WIDTH - radius
+                    if y - radius < 0:
+                        y = radius
             
             # Usuń platformy, które wyszły poza ekran
             if (platform.direction == 1 and platform.x > WIDTH) or (platform.direction == -1 and platform.x < -platform.width):
