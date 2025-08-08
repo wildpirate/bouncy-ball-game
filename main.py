@@ -146,7 +146,6 @@ def handle_ball_click():
     velocity = kick_strength / mass
     reset_ball_position()
     score += 1
-    gravity *= 1.05
     mass *= 1.05
     
     # Zwiększ licznik kliknięć
@@ -188,7 +187,6 @@ while running:
                 # Odbij piłkę bez teleportacji
                 velocity = kick_strength / mass
                 score += 1
-                gravity *= 1.05
                 mass *= 1.05
                 click_count += 1
                 
