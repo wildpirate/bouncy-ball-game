@@ -19,13 +19,18 @@ GREEN = (0, 255, 0)
 GRAY = (128, 128, 128)
 
 # Parametry piłki
-radius = 30
+base_radius = 30
+radius = base_radius * 3  # Początkowo 3x większa
 x = WIDTH // 2
 y = HEIGHT // 2
 velocity = 0
 gravity = 0.05
 mass = 1.0
 kick_strength = -10
+
+# Licznik kliknięć dla zmiany rozmiaru
+click_count = 0
+clicks_for_size_reduction = 5
 
 # Wynik
 score = 0
@@ -96,11 +101,14 @@ def reset_game():
     global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
     global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
     global platforms, next_platform_time, last_platform_check
+    global radius, click_count
     
     score = 0
     gravity = 0.05
     mass = 1.0
     velocity = 0
+    radius = base_radius * 3  # Resetuj rozmiar piłki
+    click_count = 0
     reset_ball_position()
     game_over = False
     game_started = False
@@ -122,8 +130,8 @@ def reset_game():
 
 def reset_ball_position():
     global x, y
-    x = random.randint(radius, WIDTH - radius)
-    y = random.randint(radius, HEIGHT // 2 - radius)
+    x = random.randint(int(radius), WIDTH - int(radius))
+    y = random.randint(int(radius), HEIGHT // 2 - int(radius))
 
 def spawn_coin():
     global coin_x, coin_y, coin_visible, coin_timer
@@ -131,6 +139,29 @@ def spawn_coin():
     coin_y = random.randint(coin_radius, HEIGHT - coin_radius)
     coin_visible = True
     coin_timer = time.time() + 2  # 2 sekundy widoczny
+
+def handle_ball_click():
+    global velocity, score, gravity, mass, click_count, radius, x, y
+    
+    velocity = kick_strength / mass
+    reset_ball_position()
+    score += 1
+    gravity *= 1.05
+    mass *= 1.05
+    
+    # Zwiększ licznik kliknięć
+    click_count += 1
+    
+    # Sprawdź czy należy zmniejszyć piłkę
+    if click_count % clicks_for_size_reduction == 0:
+        radius *= 0.9  # Zmniejsz o 10%
+        # Upewnij się, że piłka nie wyjdzie poza ekran po zmianie rozmiaru
+        if x - radius < 0:
+            x = radius
+        if x + radius > WIDTH:
+            x = WIDTH - radius
+        if y - radius < 0:
+            y = radius
 
 reset_ball_position()
 
@@ -154,10 +185,7 @@ while running:
             
             # Sprawdź kolizję z piłką
             if platform.check_collision(x, y, radius):
-                velocity = kick_strength / mass
-                score += 1
-                gravity *= 1.05
-                mass *= 1.05
+                handle_ball_click()
             
             # Usuń platformy, które wyszły poza ekran
             if (platform.direction == 1 and platform.x > WIDTH) or (platform.direction == -1 and platform.x < -platform.width):
@@ -247,11 +275,7 @@ while running:
                     game_started = True
                     velocity = 0
                 elif not game_over:
-                    velocity = kick_strength / mass
-                    reset_ball_position()
-                    score += 1
-                    gravity *= 1.05
-                    mass *= 1.05
+                    handle_ball_click()
 
             # Kliknięcie w przycisk resetowania
             if game_over and reset_button_rect.collidepoint(mouse_x, mouse_y):
