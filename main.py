@@ -16,6 +16,7 @@ BLACK = (0, 0, 0)
 GOLD = (255, 215, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
+GRAY = (128, 128, 128)
 
 # Parametry piłki
 radius = 30
@@ -47,6 +48,40 @@ bad_coin_timer = 0
 next_bad_coin_time = random.uniform(8, 12)
 last_bad_coin_check = time.time()
 
+# Platformy
+class Platform:
+    def __init__(self):
+        self.width = int(WIDTH * 0.3)  # 30% szerokości ekranu
+        self.height = 20
+        self.y = HEIGHT - 100  # 100 pikseli od dołu
+        self.speed = 2  # piksele na frame
+        self.direction = random.choice([-1, 1])  # -1 = lewo, 1 = prawo
+        
+        if self.direction == 1:  # idzie w prawo
+            self.x = -self.width
+        else:  # idzie w lewo
+            self.x = WIDTH
+            
+    def update(self):
+        self.x += self.speed * self.direction
+        
+    def draw(self, screen):
+        pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height))
+        pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2)
+        
+    def check_collision(self, ball_x, ball_y, ball_radius):
+        # Sprawdź czy piłka dotyka platformy
+        if (ball_y + ball_radius >= self.y and 
+            ball_y - ball_radius <= self.y + self.height and
+            ball_x + ball_radius >= self.x and 
+            ball_x - ball_radius <= self.x + self.width):
+            return True
+        return False
+
+platforms = []
+next_platform_time = random.uniform(10, 15)
+last_platform_check = time.time()
+
 # Stan gry
 clock = pygame.time.Clock()
 running = True
@@ -60,6 +95,7 @@ def reset_game():
     global score, gravity, mass, velocity, game_over, game_started
     global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
     global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
+    global platforms, next_platform_time, last_platform_check
     
     score = 0
     gravity = 0.05
@@ -78,6 +114,11 @@ def reset_game():
     last_bad_coin_check = time.time()
     next_coin_time = random.uniform(5, 10)
     next_bad_coin_time = random.uniform(8, 12)
+    
+    # Resetuj platformy
+    platforms.clear()
+    next_platform_time = random.uniform(10, 15)
+    last_platform_check = time.time()
 
 def reset_ball_position():
     global x, y
@@ -97,6 +138,30 @@ while running:
     screen.fill(WHITE)
 
     now = time.time()
+
+    # Obsługa platform tylko w trakcie aktywnej gry
+    if game_started and not game_over:
+        # Spawn nowej platformy
+        if now - last_platform_check > next_platform_time:
+            platforms.append(Platform())
+            last_platform_check = now
+            next_platform_time = random.uniform(10, 15)
+        
+        # Aktualizuj i rysuj platformy
+        for platform in platforms[:]:
+            platform.update()
+            platform.draw(screen)
+            
+            # Sprawdź kolizję z piłką
+            if platform.check_collision(x, y, radius):
+                velocity = kick_strength / mass
+                score += 1
+                gravity *= 1.05
+                mass *= 1.05
+            
+            # Usuń platformy, które wyszły poza ekran
+            if (platform.direction == 1 and platform.x > WIDTH) or (platform.direction == -1 and platform.x < -platform.width):
+                platforms.remove(platform)
 
     # Obsługa pieniążków tylko w trakcie aktywnej gry
     if not coin_visible and not game_over and game_started and now - last_coin_check > next_coin_time:
