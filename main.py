@@ -2,24 +2,90 @@ import pygame
 import random
 import sys
 import time
-import math  # [BOUNCE+] potrzebne do sqrt
+import math  # sqrt, trig
 
-# Inicjalizacja
+# ================== INIT ==================
 pygame.init()
-pygame.mixer.init()  # Inicjalizacja miksera dźwięku
+pygame.mixer.init()
 WIDTH, HEIGHT = 1200, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Podbij piłkę!")
 
-# Ładowanie muzyki
+# ================== AUDIO (opcjonalnie) ==================
 try:
     pygame.mixer.music.load("music.mp3")
     music_loaded = True
 except pygame.error:
-    print("Nie można załadować pliku music.mp3")
+    print("Nie można załadować music.mp3 (pomijam).")
     music_loaded = False
 
-# Kolory
+try:
+    pop_sound = pygame.mixer.Sound("pop.wav")
+except Exception:
+    pop_sound = None
+
+# ================== ASSETY ==================
+bubble_img = None
+bg_img = None
+platform_img_raw = None
+
+try:
+    bubble_img = pygame.image.load("banka.png").convert_alpha()
+except Exception as e:
+    print("Nie mogę wczytać banka.png – użyję kółka. Powód:", e)
+
+try:
+    bg_img = pygame.image.load("background.png").convert()
+except Exception as e:
+    print("Nie mogę wczytać background.png – użyję białego tła. Powód:", e)
+
+try:
+    platform_img_raw = pygame.image.load("platform.png").convert_alpha()
+except Exception as e:
+    print("Nie mogę wczytać platform.png – użyję prostokąta. Powód:", e)
+
+# cache’owanie skalowanych assetów
+_bubble_cache = {}
+_platform_cache = {}
+
+def get_bubble_surface(r):
+    """Zwraca przeskalowaną bańkę (2r x 2r) lub None jeśli brak pliku."""
+    r = int(max(1, r))
+    if bubble_img is None:
+        return None
+    if r in _bubble_cache:
+        return _bubble_cache[r]
+    surf = pygame.transform.smoothscale(bubble_img, (r*2, r*2))
+    _bubble_cache[r] = surf
+    return surf
+
+def get_platform_surface(width, height, direction):
+    """
+    Zwraca przeskalowany sprite platformy.
+    direction: -1 = w lewo (flipped), 1 = w prawo.
+    """
+    if platform_img_raw is None:
+        return None
+    key = (int(width), int(height), int(direction))
+    if key in _platform_cache:
+        return _platform_cache[key]
+    surf = pygame.transform.smoothscale(platform_img_raw, (int(width), int(height)))
+    if direction == -1:
+        surf = pygame.transform.flip(surf, True, False)
+    _platform_cache[key] = surf
+    return surf
+
+def draw_background():
+    """Kafelkuje background.png po całym ekranie (fallback: białe tło)."""
+    if bg_img is None:
+        screen.fill((255, 255, 255))
+        return
+    bw, bh = bg_img.get_width(), bg_img.get_height()
+    for yy in range(0, HEIGHT, bh):
+        for xx in range(0, WIDTH, bw):
+            screen.blit(bg_img, (xx, yy))
+
+# ================== KOLORY + UI ==================
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
 BLACK = (0, 0, 0)
@@ -29,95 +95,14 @@ GREEN = (0, 255, 0)
 GRAY = (128, 128, 128)
 UI_GRAY = (60, 60, 60)
 
-# Parametry piłki
-base_radius = 30
-radius = base_radius * 3  # Początkowo 3x większa
-x = WIDTH // 2
-y = HEIGHT // 2
-velocity = 0
-gravity = 0.05
-mass = 1.0
-kick_strength = -10
-
-# [BOUNCE+] docelowa wysokość odbicia od platformy (px)
-TARGET_BOUNCE_HEIGHT = 260
-
-# Licznik kliknięć dla zmiany rozmiaru
-click_count = 0
-clicks_for_size_reduction = 5
-
-# Wynik
-score = 0
-best_score = 0  # [UI+] rekord
 font = pygame.font.SysFont(None, 50)
 small_font = pygame.font.SysFont(None, 36)
 
-# Pieniążek
-coin_radius = 20
-coin_x, coin_y = 0, 0
-coin_visible = False
-coin_timer = 0
-next_coin_time = random.uniform(5, 10)  # pierwsze pojawienie się
-last_coin_check = time.time()
-
-# Czerwony pieniążek (pułapka)
-bad_coin_radius = 30
-bad_coin_x, bad_coin_y = 0, 0
-bad_coin_visible = False
-bad_coin_timer = 0
-next_bad_coin_time = random.uniform(8, 12)
-last_bad_coin_check = time.time()
-
-# Platformy
-class Platform:
-    def __init__(self):
-        self.width = int(WIDTH * 0.3)  # 30% szerokości ekranu
-        self.height = 20
-        self.y = HEIGHT - 100  # 100 pikseli od dołu
-        self.speed = 2  # piksele na frame
-        self.direction = random.choice([-1, 1])  # -1 = lewo, 1 = prawo
-        
-        if self.direction == 1:  # idzie w prawo
-            self.x = -self.width
-        else:  # idzie w lewo
-            self.x = WIDTH
-            
-    def update(self):
-        self.x += self.speed * self.direction
-        
-    def draw(self, screen):
-        pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height), border_radius=8)  # [UI+] zaokrąglenie
-        pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2, border_radius=8)
-        
-    def check_collision(self, ball_x, ball_y, ball_radius):
-        # Sprawdź czy piłka dotyka platformy (prosty AABB vs circle BB)
-        if (ball_y + ball_radius >= self.y and 
-            ball_y - ball_radius <= self.y + self.height and
-            ball_x + ball_radius >= self.x and 
-            ball_x - ball_radius <= self.x + self.width):
-            return True
-        return False
-
-platforms = []
-next_platform_time = random.uniform(5, 10)
-last_platform_check = time.time()
-
-# Stan gry
-clock = pygame.time.Clock()
-running = True
-game_started = False
-game_over = False
-paused = False  # [UI+]
-
-# Przycisk resetowania
-reset_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 50)
-
-# [UI+] pomocnicze
-def draw_shadow_text(text, x, y, font, color, shadow=(0,0,0), off=2):
-    shadow_surf = font.render(text, True, shadow)
-    screen.blit(shadow_surf, (x+off, y+off))
-    surf = font.render(text, True, color)
-    screen.blit(surf, (x, y))
+def draw_shadow_text(text, x, y, fnt, color, shadow=(0,0,0), off=2):
+    sh = fnt.render(text, True, shadow)
+    screen.blit(sh, (x+off, y+off))
+    tx = fnt.render(text, True, color)
+    screen.blit(tx, (x, y))
 
 def draw_center_panel(lines, box_w=700, box_h=220):
     panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
@@ -129,42 +114,125 @@ def draw_center_panel(lines, box_w=700, box_h=220):
         r = s.get_rect(center=(WIDTH//2, top + i*48))
         screen.blit(s, r)
 
-def reset_game():
-    global score, gravity, mass, velocity, game_over, game_started, paused
-    global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
-    global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
-    global platforms, next_platform_time, last_platform_check
-    global radius, click_count, x, y
-    
-    score = 0
-    gravity = 0.05
-    mass = 1.0
-    velocity = 0
-    radius = base_radius * 3  # Resetuj rozmiar piłki
-    click_count = 0
-    reset_ball_position()
-    game_over = False
-    game_started = False
-    paused = False
-    
-    # Zatrzymaj muzykę przy restarcie
-    if music_loaded:
-        pygame.mixer.music.stop()
-    
-    # Resetuj pieniążki
-    coin_visible = False
-    bad_coin_visible = False
-    coin_timer = 0
-    bad_coin_timer = 0
-    last_coin_check = time.time()
-    last_bad_coin_check = time.time()
-    next_coin_time = random.uniform(5, 10)
-    next_bad_coin_time = random.uniform(8, 12)
-    
-    # Resetuj platformy
-    platforms.clear()
-    next_platform_time = random.uniform(10, 15)
-    last_platform_check = time.time()
+# ================== STAN PIŁKI ==================
+base_radius = 30
+radius = base_radius * 3
+x = WIDTH // 2
+y = HEIGHT // 2
+velocity = 0.0
+gravity = 0.05
+mass = 1.0
+kick_strength = -10.0
+
+TARGET_BOUNCE_HEIGHT = 260  # stała wysokość odbicia od platform
+
+click_count = 0
+clicks_for_size_reduction = 5
+
+score = 0
+best_score = 0
+
+# monety
+coin_radius = 20
+coin_x, coin_y = 0, 0
+coin_visible = False
+coin_timer = 0.0
+next_coin_time = random.uniform(5, 10)
+last_coin_check = time.time()
+
+bad_coin_radius = 30
+bad_coin_x, bad_coin_y = 0, 0
+bad_coin_visible = False
+bad_coin_timer = 0.0
+next_bad_coin_time = random.uniform(8, 12)
+last_bad_coin_check = time.time()
+
+# PRYSKANIE
+bubble_alive = True
+bubble_respawn_at = 0.0
+POP_DURATION = 0.20
+POP_PARTICLES = 18
+particles = []  # list of dict
+
+def spawn_pop_particles(cx, cy, base_r):
+    for _ in range(POP_PARTICLES):
+        ang = random.uniform(0, 2*math.pi)
+        spd = random.uniform(120, 360)
+        vx = math.cos(ang) * spd / 60.0
+        vy = math.sin(ang) * spd / 60.0
+        life = random.uniform(0.25, 0.6)
+        particles.append({
+            "x": float(cx),
+            "y": float(cy),
+            "vx": vx,
+            "vy": vy,
+            "life": life,
+            "ttl": time.time() + life,
+            "r": random.randint(max(2, base_r//12), max(3, base_r//9)),
+            "col": (200, 230, 255)
+        })
+
+def update_and_draw_particles(now):
+    for p in particles[:]:
+        p["x"] += p["vx"]
+        p["y"] += p["vy"]
+        p["vy"] += 0.35
+        remain = p["ttl"] - now
+        if remain <= 0:
+            particles.remove(p)
+            continue
+        alpha = max(0, min(255, int(255 * (remain / max(0.001, p["life"])))))
+        r = max(1, int(p["r"] * (0.6 + 0.4 * (remain / p["life"]))))
+        s = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
+        pygame.draw.circle(s, (*p["col"], alpha), (r, r), r)
+        screen.blit(s, (int(p["x"] - r), int(p["y"] - r)))
+
+# ================== PLATFORMY ==================
+class Platform:
+    def __init__(self):
+        self.width = int(WIDTH * 0.3)  # 30% szerokości ekranu
+        if platform_img_raw:
+            scale = self.width / platform_img_raw.get_width()
+            self.height = max(10, int(platform_img_raw.get_height() * scale))
+        else:
+            self.height = 20
+        self.y = HEIGHT - 100  # GÓRNA krawędź platformy
+        self.speed = 2
+        self.direction = random.choice([-1, 1])
+        self.x = -self.width if self.direction == 1 else WIDTH
+
+    def update(self):
+        self.x += self.speed * self.direction
+
+    def draw(self, screen):
+        sprite = get_platform_surface(self.width, self.height, self.direction)
+        if sprite:
+            # rysujemy tak, żeby góra sprite’a była w self.y
+            screen.blit(sprite, (int(self.x), int(self.y - self.height)))
+        else:
+            pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height), border_radius=8)
+            pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2, border_radius=8)
+
+    def check_collision(self, ball_x, ball_y, ball_radius):
+        # prosty AABB vs koło (wystarczy do gry)
+        if (ball_y + ball_radius >= self.y and
+            ball_y - ball_radius <= self.y + self.height and
+            ball_x + ball_radius >= self.x and
+            ball_x - ball_radius <= self.x + self.width):
+            return True
+        return False
+
+platforms = []
+next_platform_time = random.uniform(5, 10)
+last_platform_check = time.time()
+
+# ================== STAN GRY ==================
+clock = pygame.time.Clock()
+running = True
+game_started = False
+game_over = False
+paused = False
+reset_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 50)
 
 def reset_ball_position():
     global x, y
@@ -176,47 +244,89 @@ def spawn_coin():
     coin_x = random.randint(coin_radius, WIDTH - coin_radius)
     coin_y = random.randint(coin_radius, HEIGHT - coin_radius)
     coin_visible = True
-    coin_timer = time.time() + 2  # 2 sekundy widoczny
-
-def handle_ball_click():
-    global velocity, score, gravity, mass, click_count, radius, x, y
+    coin_timer = time.time() + 2
     
-    velocity = kick_strength / mass
-    reset_ball_position()
+def handle_ball_click():
+    global score, mass, click_count, radius, bubble_alive, bubble_respawn_at, velocity, x, y
+    if not bubble_alive:
+        return
+    spawn_pop_particles(x, y, radius)
+    if pop_sound:
+        pop_sound.play()
     score += 1
     mass *= 1.05
-    
-    # Zwiększ licznik kliknięć
     click_count += 1
-    
-    # Sprawdź czy należy zmniejszyć piłkę
     if click_count % clicks_for_size_reduction == 0:
-        radius *= 0.9  # Zmniejsz o 10%
-        # Upewnij się, że piłka nie wyjdzie poza ekran po zmianie rozmiaru
+        radius = int(radius * 0.9)
+        # zachowaj w ekranie
         if x - radius < 0:
             x = radius
         if x + radius > WIDTH:
             x = WIDTH - radius
         if y - radius < 0:
             y = radius
+    bubble_alive = False
+    bubble_respawn_at = time.time() + POP_DURATION
+    velocity = 0.0
+
+def reset_game():
+    global score, gravity, mass, velocity, game_over, game_started, paused
+    global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
+    global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
+    global platforms, next_platform_time, last_platform_check
+    global radius, click_count, x, y, _bubble_cache, _platform_cache
+    global bubble_alive, bubble_respawn_at, particles, best_score
+
+    if score > best_score:
+        best_score = score
+
+    score = 0
+    gravity = 0.05
+    mass = 1.0
+    velocity = 0.0
+    radius = base_radius * 3
+    _bubble_cache = {}
+    _platform_cache = {}
+    click_count = 0
+    reset_ball_position()
+    game_over = False
+    game_started = False
+    paused = False
+    bubble_alive = True
+    bubble_respawn_at = 0.0
+    particles = []
+
+    if music_loaded:
+        pygame.mixer.music.stop()
+
+    coin_visible = False
+    bad_coin_visible = False
+    coin_timer = 0.0
+    bad_coin_timer = 0.0
+    last_coin_check = time.time()
+    last_bad_coin_check = time.time()
+    next_coin_time = random.uniform(5, 10)
+    next_bad_coin_time = random.uniform(8, 12)
+
+    platforms.clear()
+    next_platform_time = random.uniform(10, 15)
+    last_platform_check = time.time()
 
 reset_ball_position()
 
+# ================== PĘTLA GŁÓWNA ==================
 while running:
-    screen.fill(WHITE)
-
+    draw_background()
     now = time.time()
 
-    # [UI+] Pasek/timer monet (rysujemy wcześniej, by był pod tekstami)
+    # paski czasu monet (na HUD)
     def draw_coin_timers():
-        # złota moneta
         if coin_visible:
             total = 2.0
             remain = max(0.0, coin_timer - now)
             frac = max(0.0, min(1.0, remain / total))
             pygame.draw.rect(screen, BLACK, (20, 70, 220, 12), 2, border_radius=6)
             pygame.draw.rect(screen, GOLD,  (22, 72, int(216 * frac), 8), border_radius=6)
-        # czerwona moneta
         if bad_coin_visible:
             total = 3.0
             remain = max(0.0, bad_coin_timer - now)
@@ -224,51 +334,44 @@ while running:
             pygame.draw.rect(screen, BLACK, (20, 90, 220, 12), 2, border_radius=6)
             pygame.draw.rect(screen, RED,   (22, 92, int(216 * frac), 8), border_radius=6)
 
-    # Obsługa platform tylko w trakcie aktywnej gry (i nie w pauzie)
+    # respawn bańki po prysknięciu
+    if (not bubble_alive) and (now >= bubble_respawn_at) and game_started and (not paused) and (not game_over):
+        reset_ball_position()
+        velocity = kick_strength / max(1.0, mass)  # lekki start
+        bubble_alive = True
+
+    # platformy
     if game_started and not game_over and not paused:
-        # Spawn nowej platformy
         if now - last_platform_check > next_platform_time:
             platforms.append(Platform())
             last_platform_check = now
             next_platform_time = random.uniform(10, 15)
-        
-        # Aktualizuj i rysuj platformy
+
         for platform in platforms[:]:
             platform.update()
             platform.draw(screen)
-            
-            # Sprawdź kolizję z piłką
-            if platform.check_collision(x, y, radius):
-                # [BOUNCE+] ustaw pozycję nad platformą i nadaj prędkość
-                # aby osiągnąć stałą wysokość: v0 = -sqrt(2 * a * H)
-                # gdzie a = gravity * mass (w Twoim modelu), H = TARGET_BOUNCE_HEIGHT
+
+            if bubble_alive and platform.check_collision(x, y, radius):
                 if y + radius > platform.y:
-                    y = platform.y - radius  # przyklej nad platformą (eliminuje wielokrotne trafienia)
+                    y = platform.y - radius
+                # stała wysokość odbicia (niezależnie od masy)
                 velocity = -math.sqrt(2.0 * gravity * mass * TARGET_BOUNCE_HEIGHT)
                 score += 1
                 mass *= 1.05
                 click_count += 1
-                
-                # Sprawdź czy należy zmniejszyć piłkę
                 if click_count % clicks_for_size_reduction == 0:
-                    radius *= 0.9  # Zmniejsz o 10%
-                    # Upewnij się, że piłka nie wyjdzie poza ekran po zmianie rozmiaru
-                    if x - radius < 0:
-                        x = radius
-                    if x + radius > WIDTH:
-                        x = WIDTH - radius
-                    if y - radius < 0:
-                        y = radius
-            
-            # Usuń platformy, które wyszły poza ekran
+                    radius = int(radius * 0.9)
+                    if x - radius < 0: x = radius
+                    if x + radius > WIDTH: x = WIDTH - radius
+                    if y - radius < 0: y = radius
+
             if (platform.direction == 1 and platform.x > WIDTH) or (platform.direction == -1 and platform.x < -platform.width):
                 platforms.remove(platform)
     else:
-        # Jeśli gra nie jest aktywna, nadal rysuj istniejące platformy (żeby UI nie „znikało”)
         for platform in platforms:
             platform.draw(screen)
 
-    # Obsługa pieniążków tylko w trakcie aktywnej gry (i nie w pauzie)
+    # monety
     if not coin_visible and not game_over and game_started and not paused and now - last_coin_check > next_coin_time:
         spawn_coin()
         last_coin_check = now
@@ -277,144 +380,130 @@ while running:
     if coin_visible and now > coin_timer:
         coin_visible = False
 
-    # Obsługa czerwonych pieniążków tylko w trakcie gry
     if not bad_coin_visible and not game_over and game_started and not paused and now - last_bad_coin_check > next_bad_coin_time:
         bad_coin_x = random.randint(bad_coin_radius, WIDTH - bad_coin_radius)
         bad_coin_y = random.randint(bad_coin_radius, HEIGHT - bad_coin_radius)
         bad_coin_visible = True
-        bad_coin_timer = time.time() + 3  # widoczne przez 3 sekundy
+        bad_coin_timer = time.time() + 3
         last_bad_coin_check = now
         next_bad_coin_time = random.uniform(8, 12)
 
-    # Czas minął → znikają i odejmujemy punkty (tylko jeśli gra nie jest skończona)
     if bad_coin_visible and now > bad_coin_timer and not game_over:
         score -= 3
         bad_coin_visible = False
 
-    # Rysuj pieniążek jeśli jest widoczny (tylko jeśli gra nie jest skończona)
     if coin_visible and not game_over:
         pygame.draw.circle(screen, GOLD, (coin_x, coin_y), coin_radius)
         pygame.draw.circle(screen, BLACK, (coin_x, coin_y), coin_radius, 2)
-    
     if bad_coin_visible and not game_over:
         pygame.draw.circle(screen, (255, 0, 0), (bad_coin_x, bad_coin_y), bad_coin_radius)
         pygame.draw.circle(screen, BLACK, (bad_coin_x, bad_coin_y), bad_coin_radius, 2)
 
-    # Ekran startowy
+    # ekrany i rysowanie bańki/particle’ów
     if not game_started:
         draw_center_panel([
             ("Kliknij piłkę, aby rozpocząć!", font, BLACK),
             ("Sterowanie: P – pauza, R – reset, muzyka: włączona", small_font, UI_GRAY),
         ], box_w=820, box_h=200)
-        pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
+        if bubble_alive:
+            b = get_bubble_surface(radius)
+            if b: screen.blit(b, (int(x - radius), int(y - radius)))
+            else: pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
+        update_and_draw_particles(now)
 
     elif game_over:
-        # Ekran końcowy z przyciskiem resetowania
         draw_center_panel([
             (f"Koniec gry! Wynik: {score}", font, BLACK),
             (f"Rekord: {best_score}", small_font, UI_GRAY),
         ], box_w=700, box_h=180)
-        
-        # Rysuj przycisk resetowania
         pygame.draw.rect(screen, GREEN, reset_button_rect, border_radius=10)
         pygame.draw.rect(screen, BLACK, reset_button_rect, 3, border_radius=10)
         reset_text = small_font.render("Resetuj grę", True, BLACK)
-        reset_text_rect = reset_text.get_rect(center=reset_button_rect.center)
-        screen.blit(reset_text, reset_text_rect)
-        
-        pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
+        screen.blit(reset_text, reset_button_rect.move(
+            (reset_button_rect.width - reset_text.get_width())//2,
+            (reset_button_rect.height - reset_text.get_height())//2
+        ))
+        if bubble_alive:
+            b = get_bubble_surface(radius)
+            if b: screen.blit(b, (int(x - radius), int(y - radius)))
+            else: pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
+        update_and_draw_particles(now)
 
     else:
-        # Fizyka z masą (pauza blokuje update)
-        if not paused:
+        if not paused and bubble_alive:
             velocity += gravity * mass
             y += velocity
 
-        # Dolna granica (przegrana)
+        # przegrana
         if y - radius > HEIGHT and not game_over:
             game_over = True
-            # Zatrzymaj muzykę przy przegranej
-            if music_loaded:
-                pygame.mixer.music.stop()
-            # [UI+] aktualizacja rekordu
-            if score > best_score:
-                best_score = score
+            if music_loaded: pygame.mixer.music.stop()
+            if score > best_score: best_score = score
 
-        # Górna granica
         if y - radius < 0:
             y = radius
             velocity = 0
 
-        # Rysowanie
-        pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
-        pygame.draw.circle(screen, BLACK, (x, int(y)), radius, 3)  # [UI+] obrys
+        if bubble_alive:
+            b = get_bubble_surface(radius)
+            if b:
+                screen.blit(b, (int(x - radius), int(y - radius)))
+            else:
+                pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
+                pygame.draw.circle(screen, BLACK, (x, int(y)), radius, 3)
+
+        update_and_draw_particles(now)
 
         # HUD
         draw_shadow_text(f"Wynik: {score}", 20, 20, font, BLACK)
         draw_shadow_text(f"Rekord: {best_score}", 20, 50, small_font, UI_GRAY)
-        draw_coin_timers()  # [UI+] paski czasu monet
-
-        # [UI+] podpowiedzi
+        draw_coin_timers()
         hint = small_font.render("P – pauza  |  R – reset", True, UI_GRAY)
         screen.blit(hint, (WIDTH - hint.get_width() - 20, 20))
 
-        # [UI+] nakładka PAUZA
         if paused:
             draw_center_panel([
                 ("PAUZA", font, BLACK),
                 ("Wciśnij P, aby kontynuować", small_font, UI_GRAY),
             ], box_w=520, box_h=160)
 
-    # Obsługa zdarzeń
+    # ====== ZDARZENIA ======
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
         elif event.type == pygame.KEYDOWN:
-            # [UI+] Pauza/reset
-            if event.key == pygame.K_p:
-                if game_started and not game_over:
-                    paused = not paused
-                    if music_loaded:
-                        if paused:
-                            pygame.mixer.music.pause()
-                        else:
-                            pygame.mixer.music.unpause()
+            if event.key == pygame.K_p and game_started and not game_over:
+                paused = not paused
+                if music_loaded:
+                    if paused: pygame.mixer.music.pause()
+                    else: pygame.mixer.music.unpause()
             if event.key == pygame.K_r:
                 reset_game()
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            mouse_x, mouse_y = pygame.mouse.get_pos()
+            mx, my = pygame.mouse.get_pos()
 
-            # Kliknięcie w piłkę
-            ball_distance = ((mouse_x - x) ** 2 + (mouse_y - y) ** 2) ** 0.5
-            if ball_distance <= radius:
+            # klik w bańkę
+            if ((mx - x)**2 + (my - y)**2) ** 0.5 <= radius and bubble_alive:
                 if not game_started:
                     game_started = True
                     velocity = 0
                     paused = False
-                    # Rozpocznij muzykę przy starcie gry
-                    if music_loaded:
-                        pygame.mixer.music.play(-1)  # -1 = zapętlenie w nieskończoność
+                    if music_loaded: pygame.mixer.music.play(-1)
                 elif not game_over and not paused:
                     handle_ball_click()
 
-            # Kliknięcie w przycisk resetowania
-            if game_over and reset_button_rect.collidepoint(mouse_x, mouse_y):
+            # reset przycisk
+            if game_over and reset_button_rect.collidepoint(mx, my):
                 reset_game()
 
-            # Kliknięcie w pieniążek
-            if coin_visible:
-                coin_distance = ((mouse_x - coin_x) ** 2 + (mouse_y - coin_y) ** 2) ** 0.5
-                if coin_distance <= coin_radius:
-                    score += 5
-                    coin_visible = False  # znika od razu
-
-            # Kliknięcie w czerwony pieniążek – nic się nie dzieje, ale znika
-            if bad_coin_visible:
-                bad_coin_distance = ((mouse_x - bad_coin_x) ** 2 + (mouse_y - bad_coin_y) ** 2) ** 0.5
-                if bad_coin_distance <= bad_coin_radius:
-                    bad_coin_visible = False  # znika, ale bez efektu    
+            # monety
+            if coin_visible and ((mx - coin_x)**2 + (my - coin_y)**2) ** 0.5 <= coin_radius:
+                score += 5
+                coin_visible = False
+            if bad_coin_visible and ((mx - bad_coin_x)**2 + (my - bad_coin_y)**2) ** 0.5 <= bad_coin_radius:
+                bad_coin_visible = False
 
     pygame.display.flip()
     clock.tick(60)
