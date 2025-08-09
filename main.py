@@ -3,6 +3,7 @@ import random
 import sys
 import time
 import math  # sqrt, trig
+from typing import List
 
 # ================== INIT ==================
 pygame.init()
@@ -122,6 +123,63 @@ def draw_center_panel(lines, box_w=700, box_h=220, panel_alpha=70, text_alpha=23
         r = s.get_rect(center=(WIDTH//2, top + i*48))
         screen.blit(s, r)
 
+# ================== TOP 10 ==================
+TOP10_PATH = "top10.txt"
+top10: List[int] = []
+
+def load_top10():
+    global top10
+    top10 = []
+    try:
+        with open(TOP10_PATH, "r", encoding="utf-8") as f:
+            for line in f.readlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # Oczekiwany format: "1. 98" lub "4. -"
+                parts = line.split(".", 1)
+                if len(parts) != 2:
+                    continue
+                rest = parts[1].strip()
+                if rest == "-" or rest == "":
+                    continue
+                try:
+                    val = int(rest)
+                    top10.append(val)
+                except ValueError:
+                    pass
+    except FileNotFoundError:
+        pass
+    top10 = sorted(top10, reverse=True)[:10]
+
+def save_top10():
+    with open(TOP10_PATH, "w", encoding="utf-8") as f:
+        for i in range(10):
+            val = top10[i] if i < len(top10) else None
+            if val is None:
+                f.write(f"{i+1}. -\n")
+            else:
+                f.write(f"{i+1}. {val}\n")
+
+def update_top10(new_score: int):
+    global top10
+    if new_score <= 0:
+        return
+    top10.append(new_score)
+    top10 = sorted(top10, reverse=True)[:10]
+
+def draw_top10_list(x, y, line_height=28, color=UI_GRAY):
+    for i in range(10):
+        val = top10[i] if i < len(top10) else None
+        txt = f"{i+1}. {'-' if val is None else val}"
+        surf = small_font.render(txt, True, color)
+        # lekka przezroczystość dla listy
+        surf.set_alpha(220)
+        screen.blit(surf, (x, y + i*line_height))
+
+# załaduj ranking na starcie
+load_top10()
+
 # ================== STAN PIŁKI ==================
 base_radius = 30
 radius = base_radius * 3
@@ -133,6 +191,7 @@ mass = 1.0
 kick_strength = -10.0
 
 TARGET_BOUNCE_HEIGHT = 260  # stała wysokość odbicia od platform
+COLLISION_OFFSET = 75       # odbicie wykrywane optycznie wcześniej
 
 click_count = 0
 clicks_for_size_reduction = 5
@@ -222,8 +281,7 @@ class Platform:
             pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2, border_radius=8)
 
     def check_collision(self, ball_x, ball_y, ball_radius):
-        # prosty AABB vs koło (wystarczy do gry)
-        COLLISION_OFFSET = 75  # px wcześniej
+        # prosty AABB vs koło (wystarczy do gry) – z offsetem wcześniejszej kolizji
         if (ball_y + ball_radius >= self.y - COLLISION_OFFSET and 
             ball_y - ball_radius <= self.y + self.height and
             ball_x + ball_radius >= self.x and 
@@ -267,7 +325,6 @@ def handle_ball_click():
     click_count += 1
     if click_count % clicks_for_size_reduction == 0:
         radius = int(radius * 0.9)
-        # zachowaj w ekranie
         if x - radius < 0:
             x = radius
         if x + radius > WIDTH:
@@ -413,7 +470,7 @@ while running:
         draw_center_panel([
             ("Kliknij piłkę, aby rozpocząć!", font, BLACK),
             ("Sterowanie: P – pauza, R – reset, muzyka: włączona", small_font, UI_GRAY),
-        ], box_w=820, box_h=200)
+        ], box_w=820, box_h=200, panel_alpha=60, text_alpha=235)
         if bubble_alive:
             b = get_bubble_surface(radius)
             if b: screen.blit(b, (int(x - radius), int(y - radius)))
@@ -424,7 +481,11 @@ while running:
         draw_center_panel([
             (f"Koniec gry! Wynik: {score}", font, BLACK),
             (f"Rekord: {best_score}", small_font, UI_GRAY),
-        ], box_w=700, box_h=180)
+        ], box_w=700, box_h=180, panel_alpha=60, text_alpha=235)
+
+        # TOP-10 po prawej stronie
+        draw_top10_list(WIDTH - 220, HEIGHT//2 - 120)
+
         pygame.draw.rect(screen, GREEN, reset_button_rect, border_radius=10)
         pygame.draw.rect(screen, BLACK, reset_button_rect, 3, border_radius=10)
         reset_text = small_font.render("Resetuj grę", True, BLACK)
@@ -448,6 +509,7 @@ while running:
             game_over = True
             if music_loaded: pygame.mixer.music.stop()
             if score > best_score: best_score = score
+            update_top10(score)  # << zapis do pamięci listy
 
         if y - radius < 0:
             y = radius
@@ -474,7 +536,7 @@ while running:
             draw_center_panel([
                 ("PAUZA", font, BLACK),
                 ("Wciśnij P, aby kontynuować", small_font, UI_GRAY),
-            ], box_w=520, box_h=160)
+            ], box_w=520, box_h=160, panel_alpha=50, text_alpha=235)
 
     # ====== ZDARZENIA ======
     for event in pygame.event.get():
@@ -517,5 +579,7 @@ while running:
     pygame.display.flip()
     clock.tick(60)
 
+# zapis rankingu na wyjściu
+save_top10()
 pygame.quit()
 sys.exit()
