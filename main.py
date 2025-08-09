@@ -104,13 +104,21 @@ def draw_shadow_text(text, x, y, fnt, color, shadow=(0,0,0), off=2):
     tx = fnt.render(text, True, color)
     screen.blit(tx, (x, y))
 
-def draw_center_panel(lines, box_w=700, box_h=220):
-    panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-    panel.fill((255, 255, 255, 230))
-    screen.blit(panel, (WIDTH//2 - box_w//2, HEIGHT//2 - box_h//2))
+def draw_center_panel(lines, box_w=700, box_h=220, panel_alpha=70, text_alpha=230):
+    """
+    lines: lista tuple (txt, font, color)
+    panel_alpha: 0–255 przezroczystość tła panelu (0 = brak panelu)
+    text_alpha:  0–255 przezroczystość tekstu
+    """
+    if panel_alpha > 0:
+        panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        panel.fill((255, 255, 255, panel_alpha))
+        screen.blit(panel, (WIDTH//2 - box_w//2, HEIGHT//2 - box_h//2))
+
     top = HEIGHT//2 - box_h//2 + 20
     for i, (txt, fnt, col) in enumerate(lines):
         s = fnt.render(txt, True, col)
+        s.set_alpha(text_alpha)  # półprzezroczysty tekst
         r = s.get_rect(center=(WIDTH//2, top + i*48))
         screen.blit(s, r)
 
@@ -215,9 +223,10 @@ class Platform:
 
     def check_collision(self, ball_x, ball_y, ball_radius):
         # prosty AABB vs koło (wystarczy do gry)
-        if (ball_y + ball_radius >= self.y and
+        COLLISION_OFFSET = 75  # px wcześniej
+        if (ball_y + ball_radius >= self.y - COLLISION_OFFSET and 
             ball_y - ball_radius <= self.y + self.height and
-            ball_x + ball_radius >= self.x and
+            ball_x + ball_radius >= self.x and 
             ball_x - ball_radius <= self.x + self.width):
             return True
         return False
@@ -245,7 +254,7 @@ def spawn_coin():
     coin_y = random.randint(coin_radius, HEIGHT - coin_radius)
     coin_visible = True
     coin_timer = time.time() + 2
-    
+
 def handle_ball_click():
     global score, mass, click_count, radius, bubble_alive, bubble_respawn_at, velocity, x, y
     if not bubble_alive:
