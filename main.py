@@ -5,9 +5,18 @@ import time
 
 # Inicjalizacja
 pygame.init()
+pygame.mixer.init()  # Inicjalizacja miksera dźwięku
 WIDTH, HEIGHT = 1200, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Podbij piłkę!")
+
+# Ładowanie muzyki
+try:
+    pygame.mixer.music.load("music.mp3")
+    music_loaded = True
+except pygame.error:
+    print("Nie można załadować pliku music.mp3")
+    music_loaded = False
 
 # Kolory
 WHITE = (255, 255, 255)
@@ -112,6 +121,10 @@ def reset_game():
     reset_ball_position()
     game_over = False
     game_started = False
+    
+    # Zatrzymaj muzykę przy restarcie
+    if music_loaded:
+        pygame.mixer.music.stop()
     
     # Resetuj pieniążki
     coin_visible = False
@@ -263,6 +276,9 @@ while running:
         # Dolna granica (przegrana)
         if y - radius > HEIGHT:
             game_over = True
+            # Zatrzymaj muzykę przy przegranej
+            if music_loaded:
+                pygame.mixer.music.stop()
 
         # Górna granica
         if y - radius < 0:
@@ -288,6 +304,9 @@ while running:
                 if not game_started:
                     game_started = True
                     velocity = 0
+                    # Rozpocznij muzykę przy starcie gry
+                    if music_loaded:
+                        pygame.mixer.music.play(-1)  # -1 = zapętlenie w nieskończoność
                 elif not game_over:
                     handle_ball_click()
 
