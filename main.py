@@ -76,15 +76,33 @@ def get_platform_surface(width, height, direction):
     _platform_cache[key] = surf
     return surf
 
+# this is replciable background image
+# def draw_background():
+#     """Kafelkuje background.png po całym ekranie (fallback: białe tło)."""
+#     if bg_img is None:
+#         screen.fill((255, 255, 255))
+#         return
+#     bw, bh = bg_img.get_width(), bg_img.get_height()
+#     for yy in range(0, HEIGHT, bh):
+#         for xx in range(0, WIDTH, bw):
+#             screen.blit(bg_img, (xx, yy))
+
+# this is one strreached image for background
 def draw_background():
-    """Kafelkuje background.png po całym ekranie (fallback: białe tło)."""
+    """Fit background.png on screen (contain, centered). Fallback: solid color."""
     if bg_img is None:
-        screen.fill((255, 255, 255))
+        screen.fill((20, 22, 30))
         return
+
     bw, bh = bg_img.get_width(), bg_img.get_height()
-    for yy in range(0, HEIGHT, bh):
-        for xx in range(0, WIDTH, bw):
-            screen.blit(bg_img, (xx, yy))
+    # contain scale (entire image visible)
+    scale = min(WIDTH / bw, HEIGHT / bh)
+    new_w, new_h = int(bw * scale), int(bh * scale)
+    scaled = pygame.transform.smoothscale(bg_img, (new_w, new_h))
+
+    # subtle fill behind (won't be visible if image covers fully)
+    screen.fill((20, 22, 30))
+    screen.blit(scaled, ((WIDTH - new_w) // 2, (HEIGHT - new_h) // 2))
 
 # ================== KOLORY + UI ==================
 WHITE = (255, 255, 255)
@@ -529,19 +547,26 @@ while running:
 
         update_and_draw_particles(now)
 
-        # HUD
-        draw_shadow_text(f"Wynik: {score}", 20, 20, font, BLACK)
-        draw_shadow_text(f"Rekord: {best_score}", 20, 50, small_font, UI_GRAY)
+        # HUD (high-contrast so it's readable on bright/dark sky)
+        hud_primary = (255, 255, 255)
+        hud_secondary = (230, 230, 230)
+
+        draw_shadow_text(f"Wynik: {score}", 20, 20, font, hud_primary)
+        draw_shadow_text(f"Rekord: {best_score}", 20, 50, small_font, hud_secondary)
         draw_coin_timers()
-        hint = small_font.render("P – pauza  |  R – reset", True, UI_GRAY)
-        screen.blit(hint, (WIDTH - hint.get_width() - 20, 20))
+
+        # Right-align the hint and render with shadow too
+        hint_text = "P – pauza  |  R – reset"
+        hint_w = small_font.render(hint_text, True, hud_primary).get_width()
+        draw_shadow_text(hint_text, WIDTH - hint_w - 20, 20, small_font, hud_primary)
 
         if paused:
+            # Increase panel opacity for better contrast over the background
             draw_center_panel([
-                ("PAUZA", font, BLACK),
-                ("Wciśnij P, aby kontynuować", small_font, UI_GRAY),
-            ], box_w=520, box_h=160, panel_alpha=50, text_alpha=235)
-
+                ("PAUZA", font, (0, 0, 0)),
+                ("Wciśnij P, aby kontynuować", small_font, (60, 60, 60)),
+            ], box_w=520, box_h=160, panel_alpha=80, text_alpha=255)
+            
     # ====== ZDARZENIA ======
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
