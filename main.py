@@ -313,6 +313,10 @@ def spawn_coin():
     coin_visible = True
     coin_timer = time.time() + 2
 
+def get_mass_multiplier():
+    # First 20 successful hits/bounces ramp faster, then slow down
+    return 1.05 if click_count < 20 else 1.02
+
 def handle_ball_click():
     global score, mass, click_count, radius, bubble_alive, bubble_respawn_at, velocity, x, y
     if not bubble_alive:
@@ -321,7 +325,7 @@ def handle_ball_click():
     if pop_sound:
         pop_sound.play()
     score += 1
-    mass *= 1.05
+    mass *= get_mass_multiplier()
     click_count += 1
     if click_count % clicks_for_size_reduction == 0:
         radius = int(radius * 0.9)
@@ -423,7 +427,7 @@ while running:
                 # stała wysokość odbicia (niezależnie od masy)
                 velocity = -math.sqrt(2.0 * gravity * mass * TARGET_BOUNCE_HEIGHT)
                 score += 1
-                mass *= 1.05
+                mass *= get_mass_multiplier()
                 click_count += 1
                 if click_count % clicks_for_size_reduction == 0:
                     radius = int(radius * 0.9)
