@@ -2,6 +2,7 @@ import pygame
 import random
 import sys
 import time
+import math  # [BOUNCE+] potrzebne do sqrt
 
 # Inicjalizacja
 pygame.init()
@@ -26,6 +27,7 @@ GOLD = (255, 215, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 GRAY = (128, 128, 128)
+UI_GRAY = (60, 60, 60)
 
 # Parametry piłki
 base_radius = 30
@@ -37,12 +39,16 @@ gravity = 0.05
 mass = 1.0
 kick_strength = -10
 
+# [BOUNCE+] docelowa wysokość odbicia od platformy (px)
+TARGET_BOUNCE_HEIGHT = 260
+
 # Licznik kliknięć dla zmiany rozmiaru
 click_count = 0
 clicks_for_size_reduction = 5
 
 # Wynik
 score = 0
+best_score = 0  # [UI+] rekord
 font = pygame.font.SysFont(None, 50)
 small_font = pygame.font.SysFont(None, 36)
 
@@ -80,11 +86,11 @@ class Platform:
         self.x += self.speed * self.direction
         
     def draw(self, screen):
-        pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height))
-        pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2)
+        pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height), border_radius=8)  # [UI+] zaokrąglenie
+        pygame.draw.rect(screen, BLACK, (self.x, self.y, self.width, self.height), 2, border_radius=8)
         
     def check_collision(self, ball_x, ball_y, ball_radius):
-        # Sprawdź czy piłka dotyka platformy
+        # Sprawdź czy piłka dotyka platformy (prosty AABB vs circle BB)
         if (ball_y + ball_radius >= self.y and 
             ball_y - ball_radius <= self.y + self.height and
             ball_x + ball_radius >= self.x and 
@@ -101,16 +107,34 @@ clock = pygame.time.Clock()
 running = True
 game_started = False
 game_over = False
+paused = False  # [UI+]
 
 # Przycisk resetowania
 reset_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 50)
 
+# [UI+] pomocnicze
+def draw_shadow_text(text, x, y, font, color, shadow=(0,0,0), off=2):
+    shadow_surf = font.render(text, True, shadow)
+    screen.blit(shadow_surf, (x+off, y+off))
+    surf = font.render(text, True, color)
+    screen.blit(surf, (x, y))
+
+def draw_center_panel(lines, box_w=700, box_h=220):
+    panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    panel.fill((255, 255, 255, 230))
+    screen.blit(panel, (WIDTH//2 - box_w//2, HEIGHT//2 - box_h//2))
+    top = HEIGHT//2 - box_h//2 + 20
+    for i, (txt, fnt, col) in enumerate(lines):
+        s = fnt.render(txt, True, col)
+        r = s.get_rect(center=(WIDTH//2, top + i*48))
+        screen.blit(s, r)
+
 def reset_game():
-    global score, gravity, mass, velocity, game_over, game_started
+    global score, gravity, mass, velocity, game_over, game_started, paused
     global coin_visible, bad_coin_visible, coin_timer, bad_coin_timer
     global last_coin_check, last_bad_coin_check, next_coin_time, next_bad_coin_time
     global platforms, next_platform_time, last_platform_check
-    global radius, click_count
+    global radius, click_count, x, y
     
     score = 0
     gravity = 0.05
@@ -121,6 +145,7 @@ def reset_game():
     reset_ball_position()
     game_over = False
     game_started = False
+    paused = False
     
     # Zatrzymaj muzykę przy restarcie
     if music_loaded:
@@ -182,8 +207,25 @@ while running:
 
     now = time.time()
 
-    # Obsługa platform tylko w trakcie aktywnej gry
-    if game_started and not game_over:
+    # [UI+] Pasek/timer monet (rysujemy wcześniej, by był pod tekstami)
+    def draw_coin_timers():
+        # złota moneta
+        if coin_visible:
+            total = 2.0
+            remain = max(0.0, coin_timer - now)
+            frac = max(0.0, min(1.0, remain / total))
+            pygame.draw.rect(screen, BLACK, (20, 70, 220, 12), 2, border_radius=6)
+            pygame.draw.rect(screen, GOLD,  (22, 72, int(216 * frac), 8), border_radius=6)
+        # czerwona moneta
+        if bad_coin_visible:
+            total = 3.0
+            remain = max(0.0, bad_coin_timer - now)
+            frac = max(0.0, min(1.0, remain / total))
+            pygame.draw.rect(screen, BLACK, (20, 90, 220, 12), 2, border_radius=6)
+            pygame.draw.rect(screen, RED,   (22, 92, int(216 * frac), 8), border_radius=6)
+
+    # Obsługa platform tylko w trakcie aktywnej gry (i nie w pauzie)
+    if game_started and not game_over and not paused:
         # Spawn nowej platformy
         if now - last_platform_check > next_platform_time:
             platforms.append(Platform())
@@ -197,8 +239,12 @@ while running:
             
             # Sprawdź kolizję z piłką
             if platform.check_collision(x, y, radius):
-                # Odbij piłkę bez teleportacji
-                velocity = kick_strength / mass
+                # [BOUNCE+] ustaw pozycję nad platformą i nadaj prędkość
+                # aby osiągnąć stałą wysokość: v0 = -sqrt(2 * a * H)
+                # gdzie a = gravity * mass (w Twoim modelu), H = TARGET_BOUNCE_HEIGHT
+                if y + radius > platform.y:
+                    y = platform.y - radius  # przyklej nad platformą (eliminuje wielokrotne trafienia)
+                velocity = -math.sqrt(2.0 * gravity * mass * TARGET_BOUNCE_HEIGHT)
                 score += 1
                 mass *= 1.05
                 click_count += 1
@@ -217,9 +263,13 @@ while running:
             # Usuń platformy, które wyszły poza ekran
             if (platform.direction == 1 and platform.x > WIDTH) or (platform.direction == -1 and platform.x < -platform.width):
                 platforms.remove(platform)
+    else:
+        # Jeśli gra nie jest aktywna, nadal rysuj istniejące platformy (żeby UI nie „znikało”)
+        for platform in platforms:
+            platform.draw(screen)
 
-    # Obsługa pieniążków tylko w trakcie aktywnej gry
-    if not coin_visible and not game_over and game_started and now - last_coin_check > next_coin_time:
+    # Obsługa pieniążków tylko w trakcie aktywnej gry (i nie w pauzie)
+    if not coin_visible and not game_over and game_started and not paused and now - last_coin_check > next_coin_time:
         spawn_coin()
         last_coin_check = now
         next_coin_time = random.uniform(5, 10)
@@ -228,7 +278,7 @@ while running:
         coin_visible = False
 
     # Obsługa czerwonych pieniążków tylko w trakcie gry
-    if not bad_coin_visible and not game_over and game_started and now - last_bad_coin_check > next_bad_coin_time:
+    if not bad_coin_visible and not game_over and game_started and not paused and now - last_bad_coin_check > next_bad_coin_time:
         bad_coin_x = random.randint(bad_coin_radius, WIDTH - bad_coin_radius)
         bad_coin_y = random.randint(bad_coin_radius, HEIGHT - bad_coin_radius)
         bad_coin_visible = True
@@ -244,24 +294,30 @@ while running:
     # Rysuj pieniążek jeśli jest widoczny (tylko jeśli gra nie jest skończona)
     if coin_visible and not game_over:
         pygame.draw.circle(screen, GOLD, (coin_x, coin_y), coin_radius)
+        pygame.draw.circle(screen, BLACK, (coin_x, coin_y), coin_radius, 2)
     
     if bad_coin_visible and not game_over:
         pygame.draw.circle(screen, (255, 0, 0), (bad_coin_x, bad_coin_y), bad_coin_radius)
+        pygame.draw.circle(screen, BLACK, (bad_coin_x, bad_coin_y), bad_coin_radius, 2)
 
     # Ekran startowy
     if not game_started:
-        intro_text = font.render("Kliknij piłkę, aby rozpocząć!", True, BLACK)
-        screen.blit(intro_text, (WIDTH // 2 - 250, HEIGHT // 2 - 30))
+        draw_center_panel([
+            ("Kliknij piłkę, aby rozpocząć!", font, BLACK),
+            ("Sterowanie: P – pauza, R – reset, muzyka: włączona", small_font, UI_GRAY),
+        ], box_w=820, box_h=200)
         pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
 
     elif game_over:
         # Ekran końcowy z przyciskiem resetowania
-        over_text = font.render(f"Koniec gry! Wynik: {score}", True, BLACK)
-        screen.blit(over_text, (WIDTH // 2 - 200, HEIGHT // 2 - 80))
+        draw_center_panel([
+            (f"Koniec gry! Wynik: {score}", font, BLACK),
+            (f"Rekord: {best_score}", small_font, UI_GRAY),
+        ], box_w=700, box_h=180)
         
         # Rysuj przycisk resetowania
-        pygame.draw.rect(screen, GREEN, reset_button_rect)
-        pygame.draw.rect(screen, BLACK, reset_button_rect, 3)
+        pygame.draw.rect(screen, GREEN, reset_button_rect, border_radius=10)
+        pygame.draw.rect(screen, BLACK, reset_button_rect, 3, border_radius=10)
         reset_text = small_font.render("Resetuj grę", True, BLACK)
         reset_text_rect = reset_text.get_rect(center=reset_button_rect.center)
         screen.blit(reset_text, reset_text_rect)
@@ -269,16 +325,20 @@ while running:
         pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
 
     else:
-        # Fizyka z masą
-        velocity += gravity * mass
-        y += velocity
+        # Fizyka z masą (pauza blokuje update)
+        if not paused:
+            velocity += gravity * mass
+            y += velocity
 
         # Dolna granica (przegrana)
-        if y - radius > HEIGHT:
+        if y - radius > HEIGHT and not game_over:
             game_over = True
             # Zatrzymaj muzykę przy przegranej
             if music_loaded:
                 pygame.mixer.music.stop()
+            # [UI+] aktualizacja rekordu
+            if score > best_score:
+                best_score = score
 
         # Górna granica
         if y - radius < 0:
@@ -287,13 +347,41 @@ while running:
 
         # Rysowanie
         pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
-        score_text = font.render(f"Wynik: {score}", True, BLACK)
-        screen.blit(score_text, (20, 20))
+        pygame.draw.circle(screen, BLACK, (x, int(y)), radius, 3)  # [UI+] obrys
+
+        # HUD
+        draw_shadow_text(f"Wynik: {score}", 20, 20, font, BLACK)
+        draw_shadow_text(f"Rekord: {best_score}", 20, 50, small_font, UI_GRAY)
+        draw_coin_timers()  # [UI+] paski czasu monet
+
+        # [UI+] podpowiedzi
+        hint = small_font.render("P – pauza  |  R – reset", True, UI_GRAY)
+        screen.blit(hint, (WIDTH - hint.get_width() - 20, 20))
+
+        # [UI+] nakładka PAUZA
+        if paused:
+            draw_center_panel([
+                ("PAUZA", font, BLACK),
+                ("Wciśnij P, aby kontynuować", small_font, UI_GRAY),
+            ], box_w=520, box_h=160)
 
     # Obsługa zdarzeń
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+
+        elif event.type == pygame.KEYDOWN:
+            # [UI+] Pauza/reset
+            if event.key == pygame.K_p:
+                if game_started and not game_over:
+                    paused = not paused
+                    if music_loaded:
+                        if paused:
+                            pygame.mixer.music.pause()
+                        else:
+                            pygame.mixer.music.unpause()
+            if event.key == pygame.K_r:
+                reset_game()
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -304,10 +392,11 @@ while running:
                 if not game_started:
                     game_started = True
                     velocity = 0
+                    paused = False
                     # Rozpocznij muzykę przy starcie gry
                     if music_loaded:
                         pygame.mixer.music.play(-1)  # -1 = zapętlenie w nieskończoność
-                elif not game_over:
+                elif not game_over and not paused:
                     handle_ball_click()
 
             # Kliknięcie w przycisk resetowania
